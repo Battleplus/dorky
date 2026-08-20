@@ -282,10 +282,13 @@ async function checkCredentials() {
         });
         return true;
     }
-    try {
-        const client = await authorizeGoogleDriveClient(true);
-        if (client) return true;
-    } catch { }
+    if (existsSync(GD_CREDENTIALS_PATH)) {
+        try {
+            console.log(chalk.gray("ℹ No credentials found — starting Google Drive authorization…"));
+            const client = await authorizeGoogleDriveClient(true);
+            if (client) return true;
+        } catch { }
+    }
     console.log(chalk.red("✖ Credentials not found. Please run --init."));
     return false;
 }
