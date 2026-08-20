@@ -3,11 +3,12 @@ import { describe, it, expect } from "vitest";
 import { listAllObjects, deleteAllObjects, MAX_S3_KEYS } from "../../lib/aws-s3-helpers.js";
 
 /** Build a fake s3 client whose ListObjectsV2 pages through `pages`. */
-function fakeS3(pages, deleteCalls = []) {
+function fakeS3(pages, deleteCalls = [], listTokens = []) {
   let pageIndex = 0;
   return {
     async send(command) {
       if (command.constructor.name === "ListObjectsV2Command") {
+        listTokens.push(command.input.ContinuationToken);
         const page = pages[Math.min(pageIndex, pages.length - 1)];
         pageIndex += 1;
         return page;
@@ -29,12 +30,14 @@ describe("listAllObjects", () => {
   });
 
   it("follows NextContinuationToken across multiple pages", async () => {
+    const listTokens = [];
     const s3 = fakeS3([
       { Contents: [{ Key: "a" }], IsTruncated: true, NextContinuationToken: "tok1" },
       { Contents: [{ Key: "b" }], IsTruncated: false },
-    ]);
+    ], [], listTokens);
     const keys = await listAllObjects(s3, "bucket", "root/");
     expect(keys).toEqual(["a", "b"]);
+    expect(listTokens).toEqual([undefined, "tok1"]);
   });
 
   it("handles empty listing", async () => {
