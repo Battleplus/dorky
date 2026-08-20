@@ -200,10 +200,12 @@ async function checkCredentials() {
         });
         return true;
     }
-    try {
-        const client = await authorizeGoogleDriveClient(true);
-        if (client) return true;
-    } catch { }
+    if (existsSync(GD_CREDENTIALS_PATH)) {
+        try {
+            const client = await authorizeGoogleDriveClient(true);
+            if (client) return true;
+        } catch { }
+    }
     return false;
 }
 
