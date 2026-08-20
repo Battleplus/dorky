@@ -13,6 +13,7 @@ const boxen = require("boxen");
 const prompts = require("prompts");
 const Table = require("cli-table3");
 const gradient = require("gradient-string");
+const { readJson, writeJson, toPosix, escapeDriveName, normalizeKeys, parseDorkyignore } = require("../lib/helpers.js");
 
 // Constants & Config
 const DORKY_DIR = ".dorky";
@@ -24,17 +25,7 @@ const SCOPES = ['https://www.googleapis.com/auth/drive'];
 
 const isTTY = Boolean(process.stdout.isTTY && process.stdin.isTTY) && process.env.NO_COLOR !== "1";
 
-// Helpers
-const readJson = (p) => existsSync(p) ? JSON.parse(readFileSync(p)) : {};
-const writeJson = (p, d) => writeFileSync(p, JSON.stringify(d, null, 2));
-const toPosix = (p) => p ? p.replace(/\\/g, '/') : p;
-const escapeDriveName = (name) => name.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
-const normalizeKeys = (obj) => {
-    if (!obj) return {};
-    const out = {};
-    for (const k of Object.keys(obj)) out[toPosix(k)] = obj[k];
-    return out;
-};
+// Helpers (pure functions live in lib/helpers.js; filesystem-coupled ones stay here)
 const readMetadata = () => {
     const meta = readJson(METADATA_PATH);
     meta["stage-1-files"] = normalizeKeys(meta["stage-1-files"]);
@@ -228,7 +219,7 @@ async function list(type) {
         remoteFiles.forEach(f => console.log(chalk.cyan(`   ${f}`)));
     } else {
         console.log(chalk.blue.bold("\n📂 Untracked Files:"));
-        const exclusions = existsSync(".dorkyignore") ? readFileSync(".dorkyignore").toString().split(/\r?\n/).filter(Boolean) : [];
+        const exclusions = existsSync(".dorkyignore") ? parseDorkyignore(readFileSync(".dorkyignore").toString()) : [];
         const files = await glob("**/*", { dot: true, ignore: [...exclusions.map(e => `**/${e}/**`), ...exclusions, ".dorky/**", ".dorkyignore", ".git/**", "node_modules/**"] });
 
         files.forEach(f => {
