@@ -312,12 +312,8 @@ async function push() {
         });
     }
 
-    meta["uploaded-files"] = { ...meta["stage-1-files"] };
-    writeJson(METADATA_PATH, meta);
-
-    history.push({ id: commitId, timestamp: new Date().toISOString(), files: commitFiles });
-    writeJson(HISTORY_PATH, history);
-
+    // Archive history BEFORE updating local metadata, so if archive fails,
+    // metadata is not updated and --checkout can still restore.
     const root = path.basename(process.cwd());
     const historyPrefix = path.posix.join(root, ".dorky-history", commitId);
     if (creds.storage === "aws") {
@@ -332,13 +328,35 @@ async function push() {
         await runDrive(async (drive) => {
             for (const f of Object.keys(commitFiles)) {
                 const parentId = await getFolderId(path.posix.join(root, ".dorky-history", commitId, path.posix.dirname(f)), drive);
-                await drive.files.create({
-                    requestBody: { name: path.posix.basename(f), parents: [parentId] },
-                    media: { mimeType: commitFiles[f]["mime-type"], body: createReadStream(f) }
+                // Idempotency: check for existing file before creating to avoid duplicates on retry
+                const existing = await drive.files.list({
+                    q: `name='${escapeDriveName(path.posix.basename(f))}' and '${parentId}' in parents and trashed=false`,
+                    fields: "files(id)"
                 });
+                if (existing.data.files[0]) {
+                    await drive.files.update({
+                        fileId: existing.data.files[0].id,
+                        media: { mimeType: commitFiles[f]["mime-type"], body: createReadStream(f) }
+                    });
+                } else {
+                    await drive.files.create({
+                        requestBody: { name: path.posix.basename(f), parents: [parentId] },
+                        media: { mimeType: commitFiles[f]["mime-type"], body: createReadStream(f) }
+                    });
+                }
             }
         });
     }
+
+    // Now that archive succeeded, update local metadata and history.
+    // Re-running push retries cleanly: S3 PutObject is idempotent,
+    // and Drive now checks for existing files before creating.
+    meta["uploaded-files"] = { ...meta["stage-1-files"] };
+    writeJson(METADATA_PATH, meta);
+
+    history.push({ id: commitId, timestamp: new Date().toISOString(), files: commitFiles });
+    writeJson(HISTORY_PATH, history);
+
     results.push(`History commit saved: ${commitId}`);
 
     return results.join("\n");

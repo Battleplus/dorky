@@ -445,17 +445,28 @@ async function push() {
             await runDrive(async (drive) => {
                 for (const f of Object.keys(commitFiles)) {
                     const parentId = await getFolderId(path.posix.join(root, ".dorky-history", commitId, path.posix.dirname(f)), drive);
-                    await drive.files.create({
-                        requestBody: { name: path.posix.basename(f), parents: [parentId] },
-                        media: { mimeType: commitFiles[f]["mime-type"], body: createReadStream(f) }
+                    // Idempotency: check for existing file before creating to avoid duplicates on retry
+                    const existing = await drive.files.list({
+                        q: `name='${escapeDriveName(path.posix.basename(f))}' and '${parentId}' in parents and trashed=false`,
+                        fields: "files(id)"
                     });
+                    if (existing.data.files[0]) {
+                        await drive.files.update({
+                            fileId: existing.data.files[0].id,
+                            media: { mimeType: commitFiles[f]["mime-type"], body: createReadStream(f) }
+                        });
+                    } else {
+                        await drive.files.create({
+                            requestBody: { name: path.posix.basename(f), parents: [parentId] },
+                            media: { mimeType: commitFiles[f]["mime-type"], body: createReadStream(f) }
+                        });
+                    }
                 }
             });
         }
         historySpinner.succeed(`Archived commit ${commitId}`);
     } catch (err) {
         historySpinner.fail(`Failed to archive commit ${commitId}`);
-        // Rollback: remove uploaded files from remote since metadata won't reflect them
         throw err;
     }
 
