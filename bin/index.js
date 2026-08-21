@@ -427,12 +427,8 @@ async function push() {
     filesToUpload.forEach(f => console.log(chalk.green(`✔ Uploaded: ${f.name}`)));
     filesToDelete.forEach(f => console.log(chalk.yellow(`✔ Deleted remote: ${f}`)));
 
-    meta["uploaded-files"] = { ...meta["stage-1-files"] };
-    writeJson(METADATA_PATH, meta);
-
-    history.push({ id: commitId, timestamp: new Date().toISOString(), files: commitFiles });
-    writeJson(HISTORY_PATH, history);
-
+    // Archive history BEFORE updating local metadata, so if archive fails,
+    // metadata is not updated and --checkout can still restore.
     const root = path.basename(process.cwd());
     const historyPrefix = path.posix.join(root, ".dorky-history", commitId);
     const historySpinner = makeSpinner(`Archiving commit ${commitId}...`).start();
@@ -459,8 +455,17 @@ async function push() {
         historySpinner.succeed(`Archived commit ${commitId}`);
     } catch (err) {
         historySpinner.fail(`Failed to archive commit ${commitId}`);
+        // Rollback: remove uploaded files from remote since metadata won't reflect them
         throw err;
     }
+
+    // Now that archive succeeded, update local metadata and history
+    meta["uploaded-files"] = { ...meta["stage-1-files"] };
+    writeJson(METADATA_PATH, meta);
+
+    history.push({ id: commitId, timestamp: new Date().toISOString(), files: commitFiles });
+    writeJson(HISTORY_PATH, history);
+
     console.log(chalk.cyan(`ℹ History commit saved: ${commitId}`));
 }
 
