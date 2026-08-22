@@ -1,16 +1,14 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
+
+// Import the REAL production helpers — not copies.
+const { toPosix, normalizeKeys, readMetadata, readHistory } = require('../../lib/path-helpers.js');
 
 const BS = String.fromCharCode(92); // backslash
 
-// Re-implement the helpers exactly as they appear in bin/index.js
-const toPosix = (p) => (p ? p.split(BS).join('/') : p);
-
-const normalizeKeys = (obj) => {
-  if (!obj) return {};
-  const out = {};
-  for (const k of Object.keys(obj)) out[toPosix(k)] = obj[k];
-  return out;
-};
+// ── toPosix ────────────────────────────────────────────────────────────────
 
 describe('toPosix', () => {
   it('converts backslashes to forward slashes', () => {
@@ -27,6 +25,8 @@ describe('toPosix', () => {
     expect(toPosix(undefined)).toBe(undefined);
   });
 });
+
+// ── normalizeKeys ──────────────────────────────────────────────────────────
 
 describe('normalizeKeys', () => {
   it('normalizes Windows-style keys to posix paths', () => {
@@ -56,36 +56,75 @@ describe('normalizeKeys', () => {
   });
 });
 
-describe('readMetadata shape', () => {
-  it('normalizeKeys is idempotent on empty objects', () => {
-    const meta = { 'stage-1-files': {}, 'uploaded-files': {} };
-    meta['stage-1-files'] = normalizeKeys(meta['stage-1-files']);
-    meta['uploaded-files'] = normalizeKeys(meta['uploaded-files']);
-    expect(meta).toEqual({ 'stage-1-files': {}, 'uploaded-files': {} });
+// ── readMetadata (production function) ─────────────────────────────────────
+
+describe('readMetadata', () => {
+  let tmpDir;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'dorky-test-'));
   });
 
-  it('normalizeKeys fixes windows keys inside metadata', () => {
-    const meta = {
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns sane defaults when metadata file does not exist', () => {
+    const metaPath = join(tmpDir, 'metadata.json');
+    const meta = readMetadata(metaPath);
+    // readJson returns {} when file missing, so stage-1-files and uploaded-files
+    // come back as normalizeKeys(undefined) = {}
+    expect(meta['stage-1-files']).toEqual({});
+    expect(meta['uploaded-files']).toEqual({});
+  });
+
+  it('normalizes Windows-style keys in stage-1-files', () => {
+    const metaPath = join(tmpDir, 'metadata.json');
+    writeFileSync(metaPath, JSON.stringify({
       'stage-1-files': { ['C:' + BS + 'Users' + BS + 'test.txt']: 'hash1' },
       'uploaded-files': {},
-    };
-    meta['stage-1-files'] = normalizeKeys(meta['stage-1-files']);
-    meta['uploaded-files'] = normalizeKeys(meta['uploaded-files']);
+    }));
+    const meta = readMetadata(metaPath);
     expect(meta['stage-1-files']).toEqual({ 'C:/Users/test.txt': 'hash1' });
+  });
+
+  it('normalizes Windows-style keys in uploaded-files', () => {
+    const metaPath = join(tmpDir, 'metadata.json');
+    writeFileSync(metaPath, JSON.stringify({
+      'stage-1-files': {},
+      'uploaded-files': { ['D:' + BS + 'data' + BS + 'file.csv']: 'hash2' },
+    }));
+    const meta = readMetadata(metaPath);
+    expect(meta['uploaded-files']).toEqual({ 'D:/data/file.csv': 'hash2' });
   });
 });
 
-describe('readHistory shape', () => {
-  it('normalizes windows file keys in history entries', () => {
-    const history = [
+// ── readHistory (production function) ──────────────────────────────────────
+
+describe('readHistory', () => {
+  let tmpDir;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'dorky-test-'));
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns empty array when history file does not exist', () => {
+    const historyPath = join(tmpDir, 'history.json');
+    expect(readHistory(historyPath)).toEqual([]);
+  });
+
+  it('normalizes Windows file keys in history entries', () => {
+    const historyPath = join(tmpDir, 'history.json');
+    writeFileSync(historyPath, JSON.stringify([
       { files: { ['C:' + BS + 'Users' + BS + 'test.txt']: 'hash1' }, timestamp: 1234567890 },
       { files: { 'already/forward.txt': 'hash2' }, timestamp: 1234567891 },
-    ];
-    const normalized = history.map((e) => ({
-      ...e,
-      files: normalizeKeys(e.files),
-    }));
-    expect(normalized[0].files).toEqual({ 'C:/Users/test.txt': 'hash1' });
-    expect(normalized[1].files).toEqual({ 'already/forward.txt': 'hash2' });
+    ]));
+    const history = readHistory(historyPath);
+    expect(history[0].files).toEqual({ 'C:/Users/test.txt': 'hash1' });
+    expect(history[1].files).toEqual({ 'already/forward.txt': 'hash2' });
   });
 });

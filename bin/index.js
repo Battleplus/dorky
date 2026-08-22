@@ -8,6 +8,7 @@ const path = require("path");
 const mimeTypes = require("mime-types");
 const md5 = require('md5');
 const { EOL } = require("os");
+const { toPosix, normalizeKeys, readJson: readJsonShared, readMetadata: readMetadataShared, readHistory: readHistoryShared } = require("../lib/path-helpers.js");
 const ora = require("ora");
 const boxen = require("boxen");
 const prompts = require("prompts");
@@ -25,26 +26,11 @@ const SCOPES = ['https://www.googleapis.com/auth/drive'];
 const isTTY = Boolean(process.stdout.isTTY && process.stdin.isTTY) && process.env.NO_COLOR !== "1";
 
 // Helpers
-const readJson = (p) => existsSync(p) ? JSON.parse(readFileSync(p)) : {};
+const readJson = (p) => readJsonShared(p);
 const writeJson = (p, d) => writeFileSync(p, JSON.stringify(d, null, 2));
-const toPosix = (p) => p ? p.replace(/\\/g, '/') : p;
 const escapeDriveName = (name) => name.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
-const normalizeKeys = (obj) => {
-    if (!obj) return {};
-    const out = {};
-    for (const k of Object.keys(obj)) out[toPosix(k)] = obj[k];
-    return out;
-};
-const readMetadata = () => {
-    const meta = readJson(METADATA_PATH);
-    meta["stage-1-files"] = normalizeKeys(meta["stage-1-files"]);
-    meta["uploaded-files"] = normalizeKeys(meta["uploaded-files"]);
-    return meta;
-};
-const readHistory = () => {
-    const history = existsSync(HISTORY_PATH) ? JSON.parse(readFileSync(HISTORY_PATH)) : [];
-    return history.map(e => ({ ...e, files: normalizeKeys(e.files) }));
-};
+const readMetadata = () => readMetadataShared(METADATA_PATH);
+const readHistory = () => readHistoryShared(HISTORY_PATH);
 
 // UX helpers
 const makeSpinner = (text) => {
