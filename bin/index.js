@@ -393,10 +393,23 @@ async function push() {
                     for (const f of filesToUpload) {
                         const root = path.basename(process.cwd());
                         const parentId = await getFolderId(path.posix.dirname(path.posix.join(root, f.name)), drive);
-                        await drive.files.create({
-                            requestBody: { name: path.posix.basename(f.name), parents: [parentId] },
-                            media: { mimeType: f["mime-type"], body: createReadStream(f.name) }
+                        const fileName = path.posix.basename(f.name);
+                        const existing = await drive.files.list({
+                            q: `name='${escapeDriveName(fileName)}' and '${parentId}' in parents and trashed=false`,
+                            fields: 'files(id)'
                         });
+                        const media = { mimeType: f["mime-type"], body: createReadStream(f.name) };
+                        if (existing.data.files[0]) {
+                            await drive.files.update({
+                                fileId: existing.data.files[0].id,
+                                media
+                            });
+                        } else {
+                            await drive.files.create({
+                                requestBody: { name: fileName, parents: [parentId] },
+                                media
+                            });
+                        }
                         tick(`Uploaded ${f.name}`);
                     }
                 }
