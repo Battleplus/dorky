@@ -81,6 +81,41 @@ describe("Dorky CLI - E2E Tests", () => {
             });
             expect(result.all).toContain("Missing AWS environment variables");
         });
+
+        it("should fail fast with no browser when credentials are missing and no Drive keyfile exists (#55)", async () => {
+            // Initialize a dorky project (creates .dorky/ dir)
+            await runCli(["--init", "aws"], {
+                cwd: testDir,
+                env: {
+                    AWS_ACCESS_KEY: "test-key",
+                    AWS_SECRET_KEY: "test-secret",
+                    AWS_REGION: "us-east-1",
+                    BUCKET_NAME: "test-bucket"
+                }
+            });
+            // Remove the credentials file so checkCredentials must re-check
+            const credsPath = path.join(testDir, ".dorky", "credentials.json");
+            if (fs.existsSync(credsPath)) fs.unlinkSync(credsPath);
+            // Ensure no Google Drive keyfile exists
+            const gdPath = path.join(__dirname, "..", "..", "google-drive-credentials.json");
+            const gdBackup = gdPath + ".bak";
+            if (fs.existsSync(gdPath)) {
+                fs.renameSync(gdPath, gdBackup);
+            }
+            try {
+                const result = await runCli(["--list"], { cwd: testDir, reject: false });
+                expect(result.all).toContain("Credentials not found");
+                // Should NOT contain any Google Drive auth messages
+                expect(result.all).not.toContain("google");
+                expect(result.all).not.toContain("Google");
+                expect(result.all).not.toContain("browser");
+            } finally {
+                // Restore keyfile if it was backed up
+                if (fs.existsSync(gdBackup)) {
+                    fs.renameSync(gdBackup, gdPath);
+                }
+            }
+        });
     })
 
     describe("Complete Google Drive workdlow", () => {

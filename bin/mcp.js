@@ -10,6 +10,7 @@ const mimeTypes = require("mime-types");
 const md5 = require("md5");
 const { EOL } = require("os");
 const { toPosix, normalizeKeys, readJson: readJsonShared, readMetadata: readMetadataShared, readHistory: readHistoryShared } = require("../lib/path-helpers.js");
+const { listAllObjects, deleteAllObjects } = require("../lib/aws-s3-helpers.js");
 
 // Constants & Config
 const DORKY_DIR = ".dorky";
@@ -109,10 +110,9 @@ async function list(type) {
 
         if (creds.storage === "aws") {
             await runS3(creds, async (s3, bucket) => {
-                const { ListObjectsV2Command } = require("@aws-sdk/client-s3");
-                const data = await s3.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: root + "/" }));
-                if (!data.Contents?.length) { lines.push("No remote files found."); return; }
-                data.Contents.forEach(o => lines.push(`  ${o.Key.replace(root + "/", "")}`));
+                const keys = await listAllObjects(s3, bucket, root + "/");
+                if (keys.length === 0) { lines.push("No remote files found."); return; }
+                keys.forEach(key => lines.push(`  ${key.replace(root + "/", "")}`));
             });
         } else {
             await runDrive(async (drive) => {
@@ -186,10 +186,12 @@ async function checkCredentials() {
         });
         return true;
     }
-    try {
-        const client = await authorizeGoogleDriveClient(true);
-        if (client) return true;
-    } catch { }
+    if (existsSync(GD_CREDENTIALS_PATH)) {
+        try {
+            const client = await authorizeGoogleDriveClient(true);
+            if (client) return true;
+        } catch { }
+    }
     return false;
 }
 
@@ -459,13 +461,8 @@ async function destroy() {
 
     if (creds.storage === "aws") {
         await runS3(creds, async (s3, bucket) => {
-            const { ListObjectsV2Command, DeleteObjectsCommand } = require("@aws-sdk/client-s3");
-            const data = await s3.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: root + "/" }));
-            if (data.Contents && data.Contents.length > 0) {
-                const deleteParams = { Bucket: bucket, Delete: { Objects: data.Contents.map(o => ({ Key: o.Key })) } };
-                await s3.send(new DeleteObjectsCommand(deleteParams));
-                results.push("Remote files deleted.");
-            }
+            const deleted = await deleteAllObjects(s3, bucket, root + "/");
+            if (deleted > 0) results.push("Remote files deleted.");
         });
     } else if (creds.storage === "google-drive") {
         await runDrive(async (drive) => {

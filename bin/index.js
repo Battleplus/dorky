@@ -14,6 +14,7 @@ const boxen = require("boxen");
 const prompts = require("prompts");
 const Table = require("cli-table3");
 const gradient = require("gradient-string");
+const { listAllObjects, deleteAllObjects } = require("../lib/aws-s3-helpers.js");
 
 // Constants & Config
 const DORKY_DIR = ".dorky";
@@ -184,9 +185,8 @@ async function list(type) {
         try {
             if (creds.storage === "aws") {
                 await runS3(creds, async (s3, bucket) => {
-                    const { ListObjectsV2Command } = require("@aws-sdk/client-s3");
-                    const data = await s3.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: root + "/" }));
-                    (data.Contents || []).forEach(o => remoteFiles.push(o.Key.replace(root + "/", "")));
+                    const keys = await listAllObjects(s3, bucket, root + "/");
+                    keys.forEach(key => remoteFiles.push(key.replace(root + "/", "")));
                 });
             } else {
                 await runDrive(async (drive) => {
@@ -268,10 +268,13 @@ async function checkCredentials() {
         });
         return true;
     }
-    try {
-        const client = await authorizeGoogleDriveClient(true);
-        if (client) return true;
-    } catch { }
+    if (existsSync(GD_CREDENTIALS_PATH)) {
+        try {
+            console.log(chalk.gray("ℹ No credentials found — starting Google Drive authorization…"));
+            const client = await authorizeGoogleDriveClient(true);
+            if (client) return true;
+        } catch { }
+    }
     console.log(chalk.red("✖ Credentials not found. Please run --init."));
     return false;
 }
@@ -653,16 +656,8 @@ async function destroy() {
     try {
         if (creds.storage === "aws") {
             await runS3(creds, async (s3, bucket) => {
-                const { ListObjectsV2Command, DeleteObjectsCommand } = require("@aws-sdk/client-s3");
-                const data = await s3.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: root + "/" }));
-                if (data.Contents && data.Contents.length > 0) {
-                    const deleteParams = {
-                        Bucket: bucket,
-                        Delete: { Objects: data.Contents.map(o => ({ Key: o.Key })) }
-                    };
-                    await s3.send(new DeleteObjectsCommand(deleteParams));
-                    spinner.text = "Remote files deleted";
-                }
+                const deleted = await deleteAllObjects(s3, bucket, root + "/");
+                if (deleted > 0) spinner.text = "Remote files deleted";
             });
         } else if (creds.storage === "google-drive") {
             await runDrive(async (drive) => {
